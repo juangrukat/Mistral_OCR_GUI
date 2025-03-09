@@ -1,0 +1,3 @@
+mistralai
+PySide6
+keyring
