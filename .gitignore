@@ -1,0 +1,35 @@
+# Python bytecode files
+__pycache__/
+*.py[cod]
+*.class
+
+# macOS system files
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+*~
+
+# Environment and configuration
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.idea/
+.vscode/
+
+# Checkpoint directories created by your OCR process
+*_checkpoints/
+
+# Any API keys or sensitive information
+api_keys.json
+
