@@ -11,7 +11,8 @@ import re
 
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                               QHBoxLayout, QPushButton, QLabel, QLineEdit, 
-                              QFileDialog, QProgressBar, QMessageBox, QListWidget)
+                              QFileDialog, QProgressBar, QMessageBox, QListWidget,
+                              QGroupBox, QFormLayout, QSlider, QCheckBox)
 from PySide6.QtCore import Qt, Signal, QObject, Slot
 from PySide6.QtGui import QDragEnterEvent, QDropEvent
 
@@ -71,11 +72,12 @@ class WorkerSignals(QObject):
 
 class OCRWorker(threading.Thread):
     """Worker thread for OCR processing."""
-    def __init__(self, api_key, files, output_dir):
+    def __init__(self, api_key, files, output_dir, processing_options=None):
         super().__init__()
         self.api_key = api_key
         self.files = files
         self.output_dir = output_dir
+        self.processing_options = processing_options or {}
         self.signals = WorkerSignals()
         self.stop_event = threading.Event()
         self.daemon = True
@@ -93,8 +95,21 @@ class OCRWorker(threading.Thread):
                 
                 self.signals.progress.emit(int((i / total_files) * 100), f"Processing {pdf_name}...")
                 
-                # Use the process_pdf function from oo.py
-                result_path = process_pdf(self.api_key, pdf_path, str(output_path))
+                # Extract only the parameters that process_pdf accepts
+                # We need to check the oo.py file to see what parameters it accepts
+                process_options = {}
+                
+                # Only pass the page_by_page parameter for now
+                if self.processing_options.get('single_page_mode'):
+                    process_options['page_by_page'] = True
+                
+                # Call process_pdf with only the supported parameters
+                result_path = process_pdf(
+                    self.api_key, 
+                    pdf_path, 
+                    str(output_path),
+                    **process_options
+                )
                 
                 # Process the markdown file to clean and format it
                 with open(result_path, 'r', encoding='utf-8') as f:
@@ -212,6 +227,74 @@ class MistralOCRApp(QMainWindow):
         output_layout.addWidget(select_output_btn)
         main_layout.addLayout(output_layout)
         
+        # Add advanced settings section
+        from PySide6.QtWidgets import QGroupBox, QFormLayout, QSlider, QCheckBox
+        
+        self.advanced_settings_group = QGroupBox("Advanced Processing Settings")
+        self.advanced_settings_group.setCheckable(True)
+        self.advanced_settings_group.setChecked(False)
+        self.advanced_settings_layout = QFormLayout()
+        
+        # Chunk size slider
+        self.chunk_size_label = QLabel("Chunk Size (pages):")
+        self.chunk_size_slider = QSlider(Qt.Horizontal)
+        self.chunk_size_slider.setMinimum(1)
+        self.chunk_size_slider.setMaximum(20)
+        self.chunk_size_slider.setValue(5)
+        self.chunk_size_slider.setTickPosition(QSlider.TicksBelow)
+        self.chunk_size_slider.setTickInterval(1)
+        self.chunk_size_value = QLabel("5")
+        self.chunk_size_slider.valueChanged.connect(lambda v: self.chunk_size_value.setText(str(v)))
+        chunk_size_layout = QHBoxLayout()
+        chunk_size_layout.addWidget(self.chunk_size_slider)
+        chunk_size_layout.addWidget(self.chunk_size_value)
+        self.advanced_settings_layout.addRow(self.chunk_size_label, chunk_size_layout)
+        
+        # Image format option
+        self.use_jpeg_checkbox = QCheckBox("Use JPEG (smaller) instead of PNG (better quality)")
+        self.use_jpeg_checkbox.setChecked(True)
+        self.advanced_settings_layout.addRow("", self.use_jpeg_checkbox)
+        
+        # JPEG quality slider
+        self.jpeg_quality_label = QLabel("JPEG Quality:")
+        self.jpeg_quality_slider = QSlider(Qt.Horizontal)
+        self.jpeg_quality_slider.setMinimum(40)
+        self.jpeg_quality_slider.setMaximum(95)
+        self.jpeg_quality_slider.setValue(85)
+        self.jpeg_quality_slider.setTickPosition(QSlider.TicksBelow)
+        self.jpeg_quality_slider.setTickInterval(5)
+        self.jpeg_quality_value = QLabel("85")
+        self.jpeg_quality_slider.valueChanged.connect(lambda v: self.jpeg_quality_value.setText(str(v)))
+        jpeg_quality_layout = QHBoxLayout()
+        jpeg_quality_layout.addWidget(self.jpeg_quality_slider)
+        jpeg_quality_layout.addWidget(self.jpeg_quality_value)
+        self.advanced_settings_layout.addRow(self.jpeg_quality_label, jpeg_quality_layout)
+        
+        # Image DPI slider
+        self.image_dpi_label = QLabel("Image DPI:")
+        self.image_dpi_slider = QSlider(Qt.Horizontal)
+        self.image_dpi_slider.setMinimum(72)
+        self.image_dpi_slider.setMaximum(300)
+        self.image_dpi_slider.setValue(150)
+        self.image_dpi_slider.setTickPosition(QSlider.TicksBelow)
+        self.image_dpi_slider.setTickInterval(25)
+        self.image_dpi_value = QLabel("150")
+        self.image_dpi_slider.valueChanged.connect(lambda v: self.image_dpi_value.setText(str(v)))
+        image_dpi_layout = QHBoxLayout()
+        image_dpi_layout.addWidget(self.image_dpi_slider)
+        image_dpi_layout.addWidget(self.image_dpi_value)
+        self.advanced_settings_layout.addRow(self.image_dpi_label, image_dpi_layout)
+        
+        # Single page mode
+        self.single_page_mode_checkbox = QCheckBox("Process one page at a time (slowest but most reliable)")
+        self.single_page_mode_checkbox.setChecked(False)
+        self.advanced_settings_layout.addRow("", self.single_page_mode_checkbox)
+        
+        self.advanced_settings_group.setLayout(self.advanced_settings_layout)
+        
+        # Add advanced settings to main layout
+        main_layout.addWidget(self.advanced_settings_group)
+        
         # Progress bar
         main_layout.addWidget(QLabel("Progress:"))
         self.progress_bar = QProgressBar()
@@ -321,14 +404,25 @@ class MistralOCRApp(QMainWindow):
         # Get all files from the list
         files = [self.file_list.item(i).text() for i in range(self.file_list.count())]
         
+        # Get advanced settings if enabled
+        processing_options = {}
+        if self.advanced_settings_group.isChecked():
+            processing_options = {
+                "chunk_size": self.chunk_size_slider.value(),
+                "use_jpeg": self.use_jpeg_checkbox.isChecked(),
+                "jpeg_quality": self.jpeg_quality_slider.value(),
+                "image_dpi": self.image_dpi_slider.value(),
+                "single_page_mode": self.single_page_mode_checkbox.isChecked()
+            }
+        
         # Disable UI elements during processing
         self.process_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
         self.progress_bar.setValue(0)
         self.status_label.setText("Starting processing...")
         
-        # Start worker thread
-        self.worker = OCRWorker(api_key, files, output_dir)
+        # Start worker thread with advanced options
+        self.worker = OCRWorker(api_key, files, output_dir, processing_options)
         self.worker.signals.progress.connect(self.update_progress)
         self.worker.signals.finished.connect(self.processing_finished)
         self.worker.signals.error.connect(self.processing_error)
@@ -369,3 +463,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
